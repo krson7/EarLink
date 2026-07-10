@@ -1,0 +1,12 @@
+# 이어링크(EarLink) 설정 — M1은 server 섹션만 사용
+server:
+  host: 0.0.0.0        # 스마트폰/터널 테스트를 위해 모든 인터페이스 바인딩
+  port: 8000
+
+data:
+  # M3: AI Hub 수어 영상 샘플(New_sample) 루트 — 하위 원천데이터/만 스캔한다.
+  # $DATA_ROOT 환경변수 또는 --data-root CLI 인자가 있으면 그쪽이 우선.
+  data_root: "/Users/ayaan/Downloads/New_sample"
+
+# segmentation:        # M5: 발화 구간 탐지 임곗값
+# model:               # M4: 학습 하이퍼파라미터

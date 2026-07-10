@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>이어링크 — 수어 특징 파이프라인 (M2)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #0f172a; color: #e2e8f0;
+                 font-family: -apple-system, "Apple SD Gothic Neo", sans-serif; }
+    body { display: flex; flex-direction: column; align-items: center; }
+
+    header { padding: 10px 16px; font-size: 16px; font-weight: 700; align-self: flex-start; }
+    header small { font-weight: 400; color: #94a3b8; margin-left: 8px; }
+
+    #banner { position: fixed; top: 0; left: 0; right: 0; z-index: 30;
+              background: #dc2626; color: #fff; padding: 10px 16px;
+              font-size: 14px; text-align: center; }
+
+    main { flex: 1; display: flex; align-items: center; justify-content: center;
+           width: 100%; padding: 8px; }
+    #stage { position: relative; max-width: 960px; width: 100%; }
+    #stage video { display: block; width: 100%; height: auto; border-radius: 12px;
+                   background: #000; }
+    #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+                    pointer-events: none; }
+    .mirror { transform: scaleX(-1); }
+
+    #hud { position: fixed; top: 10px; right: 10px; z-index: 20;
+           background: rgba(15, 23, 42, .75); border: 1px solid #334155;
+           border-radius: 8px; padding: 8px 12px; font-size: 12px;
+           font-family: ui-monospace, Menlo, monospace; line-height: 1.7;
+           min-width: 130px; }
+    #statusDot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                 background: #64748b; margin-right: 6px; }
+    #statusDot.ok { background: #22c55e; }
+    #statusDot.bad { background: #f59e0b; }
+
+    #flipBtn { position: fixed; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%;
+               transform: translateX(-50%); z-index: 20;
+               padding: 12px 24px; font-size: 15px; border: none; border-radius: 999px;
+               background: #2563eb; color: #fff; cursor: pointer; }
+    #flipBtn:active { background: #1d4ed8; }
+    #flipBtn:disabled { opacity: .5; }
+  </style>
+</head>
+<body>
+  <header>이어링크 <small>수어 특징 파이프라인 — 연구 시제품 (M2)</small></header>
+  <div id="banner" hidden></div>
+  <main>
+    <div id="stage">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+  </main>
+  <div id="hud">
+    <div><span id="statusDot"></span><span id="statusText">초기화 중…</span></div>
+    <div>frames: <span id="hudFrames">0</span></div>
+    <div>RTT: <span id="hudRtt">–</span> ms</div>
+    <div>dims: <span id="hudDims">0</span></div>
+    <div>feat: <span id="hudFeat">–</span></div>
+    <div>mode: <span id="hudMode">–</span></div>
+  </div>
+  <button id="flipBtn" hidden>카메라 전환</button>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# M1 전용 의존성 — tensorflow는 M4(학습)에서 추가
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pyyaml>=6.0
+
+# M2: 테스트 의존성
+pytest>=8.0
+httpx>=0.27
+
+# M3: 데이터 전처리 — 추출기 버전은 web/app.js MP_VERSION(0.10.35)과 반드시 일치
+mediapipe==0.10.35   # opencv-contrib-python·numpy를 전이 설치 — opencv-python 별도 추가 금지(cv2 중복 충돌)
+numpy                # np.save 등 직접 사용 (버전 제약은 mediapipe가 결정)
+

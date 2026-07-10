@@ -1,0 +1,22 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# 학습 산출물 (M4)
+models/*.keras
+models/*.json
+!models/.gitkeep
+
+# M3: 전처리 산출물·MediaPipe 모델 캐시
+data/
+models/mediapipe/
+
+# 개발 중 도구 산출물 (브라우저 진단 캡처 등)
+.playwright-mcp/
+
+# 환경 변수
+.env
