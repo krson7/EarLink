@@ -1,4 +1,11 @@
-"""M3: 정면 WORD 영상 → MediaPipe Tasks 재추출 → shared.features 정규화 → .npy.
+"""M3: 후보 CSV의 정면 WORD 영상 → 트리밍 구간 MediaPipe 재추출 → .npy.
+
+라벨·트리밍 구간은 training/earlink_30words_candidates.csv 가 소스다
+(build_dataset.load_candidates). 각 영상은 morpheme 의 start_sec~end_sec
+구간만 특징으로 수집한다 (앞뒤 대기 자세 제거). 단, 구간 이전 프레임도
+detect 에는 넣는다 — 브라우저 추론은 카메라가 켜진 뒤 계속 추적 중이라
+제스처 시작 시점에 트래커가 이미 웜 상태이므로, 콜드 스타트 추출이
+오히려 파리티 위반이기 때문(워밍업 프레임의 특징은 버린다).
 
 추출기 파리티 원칙 (A안):
 - 제공된 OpenPose JSON(라벨링데이터/)은 사용하지 않는다 — 학습과 추론이
@@ -11,11 +18,11 @@
 추출기 모드는 실행(run) 단위로 하나만 쓴다 — 영상/프레임 중간 전환 금지
 (혼합 추출기 데이터셋 방지). Python Holistic 은 불안정 사례가 보고되어
 (mediapipe#5181) 시작 시 실제 detect 프로브로 가용성을 확인한다.
-세그폴트는 포착할 수 없으므로, 3개 ID 단계 실행이 조기 검출 장치다.
 """
 
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.request
@@ -30,8 +37,8 @@ from mediapipe.tasks.python import BaseOptions, vision
 from shared.features import FEATURE_DIM, extract_features
 from training.build_dataset import (
     DEFAULT_OUT,
+    load_candidates,
     resolve_data_root,
-    scan_frontal_videos,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -177,44 +184,62 @@ def create_extractor(mode, models_dir):
 # ---------------------------------------------------------------- 영상 처리
 
 
-def process_video(video_path, extractor):
-    """영상 전체 프레임(30fps 기준)을 추출·정규화해 (T, 250) float32 반환."""
+def process_video(video_path, extractor, start_sec, end_sec):
+    """[start_sec, end_sec] 트리밍 구간만 특징으로 수집해 (T, 250) 반환.
+
+    순차 디코딩한다 (시크 금지 — CAP_PROP_POS_FRAMES 는 코덱에 따라 부정확).
+    구간 이전 프레임도 detect 에는 넣되(트래커 워밍업 — 파리티 원칙, 모듈
+    docstring 참조) 특징은 버리고, end_frame 이후는 디코딩을 중단한다.
+    타임스탬프는 절대 시각(idx*1000/fps)을 유지한다.
+    """
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS)
     if not (1.0 <= fps <= 120.0):
-        fps = 30.0  # 메타데이터 손상 대비 — CLAUDE.md §5 기준값
+        print(f"[경고] {Path(video_path).name}: fps 메타데이터 이상({fps}) → "
+              "30.0 폴백 — 트리밍 프레임 계산에 영향")
+        fps = 30.0  # CLAUDE.md §5 기준값
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+    # 경계가 정수 프레임에 정확히 떨어질 때의 off-by-one 방지용 엡실론.
+    # ceil(-eps)로 경계 프레임을 포함하는 안전한 방향을 택한다.
+    start_frame = int(math.floor(start_sec * fps + 1e-9))
+    end_frame = int(math.ceil(end_sec * fps - 1e-9))
+
     rows = []
-    n_frames = n_invalid = left_miss = right_miss = 0
+    n_in_range = n_invalid = left_miss = right_miss = 0
+    idx = 0
     prev_ts = -1
     while True:
         ok, bgr = cap.read()
-        if not ok:
+        if not ok or idx > end_frame:
             break
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        ts = int(round(n_frames * 1000.0 / fps))
+        ts = int(round(idx * 1000.0 / fps))
         if ts <= prev_ts:  # detect_for_video 는 단조 증가 타임스탬프 필수
             ts = prev_ts + 1
         prev_ts = ts
 
-        v = extract_features(*extractor.detect(img, ts))
-        if v is None:
-            n_invalid += 1  # 포즈 미검출 프레임은 드롭 (계수만 남김)
-        else:
-            left_miss += v[MASK_L] == 0.0
-            right_miss += v[MASK_R] == 0.0
-            rows.append(v)
-        n_frames += 1
+        v = extract_features(*extractor.detect(img, ts))  # 워밍업 포함 항상 detect
+        if idx >= start_frame:  # 특징은 트리밍 구간 내에서만 수집
+            n_in_range += 1
+            if v is None:
+                n_invalid += 1  # 포즈 미검출 프레임은 드롭 (계수만 남김)
+            else:
+                left_miss += v[MASK_L] == 0.0
+                right_miss += v[MASK_R] == 0.0
+                rows.append(v)
+        idx += 1
     cap.release()
 
     n_valid = len(rows)
     stats = {
-        "n_frames": n_frames,
+        "n_frames": n_in_range,       # 트리밍 구간 내 프레임 수
         "n_valid": n_valid,
         "n_invalid": n_invalid,
+        "n_frames_decoded": idx,      # 워밍업 포함 실제 디코딩 수
+        "trim_out_of_range": idx <= start_frame,  # 구간이 영상 길이를 벗어남
         # 미검출률은 유효 프레임 대비 비율
         "left_miss_ratio": round(left_miss / n_valid, 4) if n_valid else None,
         "right_miss_ratio": round(right_miss / n_valid, 4) if n_valid else None,
@@ -313,13 +338,17 @@ def compare_extractors(video_path, models_dir, n_probe_frames=30):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="정면 WORD 영상 MediaPipe 재추출 → npy")
+    parser = argparse.ArgumentParser(
+        description="후보 CSV의 정면 영상 트리밍 구간 MediaPipe 재추출 → npy")
     parser.add_argument("--data-root", help="데이터셋 루트 (기본: config.yaml)")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--ids", help="쉼표 구분 WORD ID (예: WORD1501,WORD1502)")
-    parser.add_argument("--limit", type=int, help="앞에서부터 N개 WORD ID만 처리")
+    parser.add_argument("--ids", help="쉼표 구분 WORD ID (예: WORD1637,WORD2394)")
+    parser.add_argument("--limit", type=int, help="CSV(선정순번) 순 앞 N개만 처리")
     parser.add_argument("--extractor", choices=("auto", "holistic", "combo"),
                         default="auto")
+    parser.add_argument("--margin-sec", type=float, default=0.0,
+                        help="트리밍 구간 양쪽 컨텍스트 여유(초) — 손 올리기/"
+                             "내리기 전환 동작 포함 추출 (컨텍스트 증강 학습용)")
     parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR)
     parser.add_argument("--force", action="store_true", help="기존 npy 재추출")
     parser.add_argument("--compare-extractors", action="store_true",
@@ -327,13 +356,12 @@ def main():
     args = parser.parse_args()
 
     data_root = resolve_data_root(args.data_root)
-    entries = scan_frontal_videos(data_root)
+    entries = load_candidates(data_root)
     if args.ids:
         wanted = set(args.ids.split(","))
-        entries = [e for e in entries if e.label in wanted]
+        entries = [c for c in entries if c.word_id in wanted]
     if args.limit:
-        labels = sorted({e.label for e in entries})[:args.limit]
-        entries = [e for e in entries if e.label in set(labels)]
+        entries = entries[:args.limit]  # CSV(선정순번) 순서 유지
     if not entries:
         sys.exit("[오류] 처리할 영상이 없습니다 — --ids/--limit/DATA_ROOT 확인.")
 
@@ -363,20 +391,46 @@ def main():
             print(f"[스킵] {e.stem} (완료됨 — 재추출은 --force)")
             continue
 
+        # 컨텍스트 여유: 구간을 양쪽으로 넓혀 전환 동작을 포함시킨다.
+        # lead/sign 프레임 수를 manifest에 기록해 학습이 수어 위치를 알게 한다.
+        ctx_start = max(0.0, e.start_sec - args.margin_sec)
+        ctx_end = e.end_sec + args.margin_sec  # 영상 끝은 process_video가 자름
         extractor = create_extractor(mode, args.models_dir)
         try:
-            arr, stats = process_video(e.path, extractor)
+            arr, stats = process_video(e.path, extractor, ctx_start, ctx_end)
         finally:
             extractor.close()
+        fps = stats["fps"]
+        lead_frames = (int(math.floor(e.start_sec * fps + 1e-9))
+                       - int(math.floor(ctx_start * fps + 1e-9)))
+        sign_frames = (int(math.ceil(e.end_sec * fps - 1e-9))
+                       - int(math.floor(e.start_sec * fps + 1e-9)) + 1)
+        if args.margin_sec > 0 and stats["n_invalid"] > 0:
+            # 무효 프레임 드롭 시 lead/sign 인덱스가 어긋난다 — 이 데이터셋에선
+            # 발생하지 않지만(전 영상 무효 0), 발생하면 경고로 드러낸다.
+            print(f"[경고] {e.stem}: 무효 프레임 {stats['n_invalid']}개 — "
+                  "lead/sign 프레임 수가 부정확할 수 있음")
 
         entry = {
-            "label": e.label,
+            "label": e.korean,          # 라벨 정본은 한국어 단어
+            "word_id": e.word_id,
+            "korean_word": e.korean,
+            "start_sec": e.start_sec,
+            "end_sec": e.end_sec,
+            "margin_sec": args.margin_sec,
+            "lead_frames": lead_frames,   # npy 앞쪽 컨텍스트(전환) 프레임 수
+            "sign_frames": min(sign_frames, stats["n_valid"] - lead_frames),
             **stats,
             "extractor_mode": mode,
             "mediapipe_version": mp.__version__,
             "extracted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
-        if len(arr) == 0:
+        if stats["trim_out_of_range"]:
+            entry["status"] = "trim_out_of_range"
+            n_fail += 1
+            print(f"[실패] {e.stem}: 트리밍 구간({e.start_sec}~{e.end_sec}s)이 "
+                  "영상 길이를 벗어남")
+        elif len(arr) == 0:
             entry["status"] = "empty"
             n_fail += 1
             print(f"[실패] {e.stem}: 유효 프레임 0")
@@ -384,7 +438,8 @@ def main():
             save_npy(npy_path, arr)
             entry["status"] = "ok"
             n_done += 1
-            print(f"{e.stem}  {e.label}  shape={arr.shape}  "
+            print(f"{e.stem}  {e.korean}({e.word_id})  shape={arr.shape}  "
+                  f"구간 {e.start_sec:.2f}~{e.end_sec:.2f}s  "
                   f"무효 {stats['n_invalid']}  "
                   f"왼손누락 {stats['left_miss_ratio'] * 100:.1f}%  "
                   f"오른손누락 {stats['right_miss_ratio'] * 100:.1f}%")

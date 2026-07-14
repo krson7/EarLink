@@ -11,3 +11,9 @@ httpx>=0.27
 mediapipe==0.10.35   # opencv-contrib-python·numpy를 전이 설치 — opencv-python 별도 추가 금지(cv2 중복 충돌)
 numpy                # np.save 등 직접 사용 (버전 제약은 mediapipe가 결정)
 
+# M4: 학습 — numpy 2.x와 호환되는 라인 (2.19는 numpy<2.2 요구 → mediapipe와 충돌)
+tensorflow==2.21.0
+matplotlib>=3.9      # evaluate.py 직접 사용 (혼동행렬·정확도 곡선)
+# 선택(TF 2.21과 조합 미검증, 기본 미설치): pip install tensorflow-metal==1.2.0
+#   → train.py가 GPU 프로브 실패 시 자동 CPU 폴백. import 자체가 죽으면 uninstall.
+

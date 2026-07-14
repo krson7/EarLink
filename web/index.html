@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>이어링크 — 수어 특징 파이프라인 (M2)</title>
+  <title>이어링크 — 실시간 수어 인식 (M5)</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; background: #0f172a; color: #e2e8f0;
@@ -42,17 +42,43 @@
                background: #2563eb; color: #fff; cursor: pointer; }
     #flipBtn:active { background: #1d4ed8; }
     #flipBtn:disabled { opacity: .5; }
+
+    #recDot { position: absolute; top: 10px; left: 10px; z-index: 15;
+              display: flex; align-items: center; gap: 8px;
+              background: rgba(15, 23, 42, .75); border-radius: 999px;
+              padding: 6px 14px; font-size: 13px; font-weight: 600; }
+    #recDot .dot { width: 10px; height: 10px; border-radius: 50%;
+                   background: #ef4444; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+    #results { position: fixed; left: 10px;
+               bottom: max(20px, env(safe-area-inset-bottom)); z-index: 20;
+               max-width: 40vw; min-width: 150px; max-height: 30vh;
+               overflow-y: auto; background: rgba(15, 23, 42, .75);
+               border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; }
+    #results:empty { display: none; }
+    #results .entry { font-size: 20px; font-weight: 700; padding: 3px 0; }
+    #results .entry small { font-size: 12px; font-weight: 400; color: #94a3b8; }
+    #results .entry.miss { color: #64748b; font-size: 14px; font-weight: 400; }
+
+    #ttsBtn { position: fixed; right: 10px;
+              bottom: max(20px, env(safe-area-inset-bottom)); z-index: 20;
+              width: 48px; height: 48px; font-size: 22px; border: 1px solid #334155;
+              border-radius: 50%; background: rgba(15, 23, 42, .75); cursor: pointer; }
   </style>
 </head>
 <body>
-  <header>이어링크 <small>수어 특징 파이프라인 — 연구 시제품 (M2)</small></header>
+  <header>이어링크 <small>실시간 수어 인식 — 연구 시제품 (M5)</small></header>
   <div id="banner" hidden></div>
   <main>
     <div id="stage">
       <video id="video" autoplay muted playsinline></video>
       <canvas id="overlay"></canvas>
+      <div id="recDot" hidden><span class="dot"></span>수어 인식 중</div>
     </div>
   </main>
+  <div id="results" aria-live="polite"></div>
+  <button id="ttsBtn" title="음성 출력 켜기/끄기">🔊</button>
   <div id="hud">
     <div><span id="statusDot"></span><span id="statusText">초기화 중…</span></div>
     <div>frames: <span id="hudFrames">0</span></div>

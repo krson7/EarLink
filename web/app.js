@@ -1,5 +1,5 @@
-// 이어링크(EarLink) M2 — 카메라 → MediaPipe 키포인트 → 캔버스 시각화
-//                        + 정규화 특징 벡터(250차원) WebSocket 전송.
+// 이어링크(EarLink) M5 — 카메라 → MediaPipe 키포인트 → 특징 벡터 전송
+//                        → 서버 발화 탐지·추론 결과 표시 + 한국어 TTS.
 //
 // 개인정보 설계 원칙: 서버로는 정규화된 특징 벡터 JSON만 보낸다.
 // 영상 프레임(이미지/blob)을 전송하는 코드를 이 파일에 추가하지 않는다.
@@ -32,6 +32,9 @@ const canvas = document.getElementById("overlay");
 const ctx = canvas.getContext("2d");
 const banner = document.getElementById("banner");
 const flipBtn = document.getElementById("flipBtn");
+const recDot = document.getElementById("recDot");
+const results = document.getElementById("results");
+const ttsBtn = document.getElementById("ttsBtn");
 const hud = {
   dot: document.getElementById("statusDot"),
   status: document.getElementById("statusText"),
@@ -47,6 +50,61 @@ function setStatus(text, ok) {
   hud.dot.className = ok === true ? "ok" : ok === false ? "bad" : "";
 }
 function showBanner(msg) { banner.textContent = msg; banner.hidden = false; }
+
+// ---------------------------------------------------------------- TTS (한국어)
+
+const tts = {
+  enabled: true,
+  voice: null,
+  pick() {
+    // ko 보이스 탐색 — 기기 내장(localService) 우선
+    const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith("ko"));
+    this.voice = voices.find((v) => v.localService) ?? voices[0] ?? null;
+  },
+  speak(text) {
+    if (!this.enabled || !("speechSynthesis" in window)) return;
+    speechSynthesis.cancel(); // 백로그 방지 — 직전 단어 끊김은 허용
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "ko-KR";
+    if (this.voice) u.voice = this.voice;
+    speechSynthesis.speak(u);
+  },
+};
+if ("speechSynthesis" in window) {
+  tts.pick(); // Safari 는 voiceschanged 가 안 올 수 있어 즉시 시도도 병행
+  speechSynthesis.addEventListener?.("voiceschanged", () => tts.pick());
+  // iOS: speak() 는 사용자 제스처 후에만 허용 — 카메라 권한 탭은 DOM 제스처가
+  // 아니므로 최초 화면 터치 1회로 언락한다 (빈 발화 → 즉시 취소).
+  document.addEventListener("pointerdown", () => {
+    speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+    speechSynthesis.cancel();
+  }, { once: true });
+}
+ttsBtn.addEventListener("click", () => {
+  tts.enabled = !tts.enabled;
+  if (!tts.enabled) speechSynthesis?.cancel();
+  ttsBtn.textContent = tts.enabled ? "🔊" : "🔇";
+});
+
+// ---------------------------------------------------------------- 결과 로그
+
+const MAX_RESULT_ENTRIES = 50;
+
+function appendResult(m) {
+  const el = document.createElement("div");
+  const pct = Math.round(m.confidence * 100);
+  if (m.text === null) {
+    // 서버 계약: text=null ⇒ 저신뢰 "인식 안 됨" (TTS 금지)
+    el.className = "entry miss";
+    el.innerHTML = `인식 안 됨 <small>(추정: ${m.top1} ${pct}%)</small>`;
+  } else {
+    el.className = "entry";
+    el.innerHTML = `${m.text} <small>${pct}%</small>`;
+  }
+  results.append(el);
+  while (results.children.length > MAX_RESULT_ENTRIES) results.firstChild.remove();
+  results.scrollTop = results.scrollHeight;
+}
 
 // ---------------------------------------------------------------- MediaPipe 로드
 
@@ -238,10 +296,16 @@ class WSManager {
     this.ws.onmessage = (ev) => {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
-      if (m.type !== "echo") return;
-      hud.frames.textContent = m.frame_id;
-      hud.rtt.textContent = Math.max(0, Math.round(performance.now() - m.t));
-      hud.dims.textContent = m.n_dims;
+      if (m.type === "echo") {
+        hud.frames.textContent = m.frame_id;
+        hud.rtt.textContent = Math.max(0, Math.round(performance.now() - m.t));
+        hud.dims.textContent = m.n_dims;
+      } else if (m.type === "status") {
+        recDot.hidden = m.state !== "signing";
+      } else if (m.type === "result") {
+        appendResult(m);
+        if (m.text !== null) tts.speak(m.text);
+      }
     };
     this.ws.onclose = () => {
       setStatus("재연결 중…", false);

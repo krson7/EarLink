@@ -1,0 +1,11 @@
+# 크로스플랫폼(macOS ↔ Windows) 일관성.
+# 텍스트는 저장소에 LF로 정규화 — 파이썬·JS·YAML 소스는 어디서 체크아웃해도 동일.
+* text=auto eol=lf
+
+# 바이너리 — CRLF 변환·diff 금지 (모델 파일 손상 방지가 핵심).
+*.keras binary
+*.png binary
+*.npy binary
+*.npz binary
+*.mp4 binary
+*.task binary
