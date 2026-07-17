@@ -1,0 +1,7 @@
+# 대용량·라이선스(AI Hub)·개인정보·재생성 가능 파일 제외
+shots/
+*.mp4
+hand_landmarker.task   # 첫 실행 시 MediaPipe URL에서 자동 다운로드
+__pycache__/
+*.pyc
+.vscode/

@@ -1,0 +1,6 @@
+# Rahites 지문자 데모 의존성 (이어링크 .venv 로 실행하면 이미 충족)
+mediapipe==0.10.35   # HandLandmarker(Tasks) + opencv-contrib 전이 설치
+tensorflow>=2.11     # tf.lite.Interpreter 로 tflite 로드 (버전 무관)
+pillow>=9            # 한글 오버레이 렌더
+numpy
+# opencv 는 mediapipe 가 opencv-contrib-python 으로 전이 설치함 (별도 설치 불필요)
