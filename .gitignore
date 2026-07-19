@@ -21,6 +21,10 @@ models/*.png
 data/
 models/mediapipe/
 
+# Track 2: 지문자 tflite (Rahites 오픈소스 — 핸드오프 아티팩트, 저장소에 포함)
+!models/fingerspelling/
+!models/fingerspelling/*.tflite
+
 # 개발 중 도구 산출물 (브라우저 진단 캡처 등)
 .playwright-mcp/
 

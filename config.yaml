@@ -31,3 +31,14 @@ model:
   window_frames: 45
   version: 1
   confidence_threshold: 0.5  # M5: 미만이면 "인식 안 됨" (30단어 밖 동작 억지 매칭 방지)
+
+# Track 2: 지문자 모드 — Rahites/Sign_Language_Translation tflite (오픈소스, 그대로 사용).
+# 재학습(§11.5 ksl_finger) 시 model_path·라벨(server/fingerspelling.ACTIONS)만 교체.
+fingerspelling:
+  model_path: "models/fingerspelling/multi_hand_gesture_classifier.tflite"
+  seq_len: 10              # tflite 입력 시퀀스 길이 (모델 고정)
+  conf_threshold: 0.9      # 자모 확정 confidence 임곗값
+  # 같은 자모를 N프레임(~0.6초 @15fps) 유지해야 확정 — 자모를 만드는 도중
+  # 스쳐가는 손모양(예: ㅂ 만들다 거치는 ㅍ)은 유지 시간이 짧아 걸러진다.
+  # 연속 같은 자모(학교의 ㄱㄱ)는 사이에 손을 잠깐 내렸다 올리면 재확정된다.
+  confirm_frames: 9

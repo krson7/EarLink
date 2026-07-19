@@ -35,6 +35,10 @@ const flipBtn = document.getElementById("flipBtn");
 const recDot = document.getElementById("recDot");
 const results = document.getElementById("results");
 const ttsBtn = document.getElementById("ttsBtn");
+const modeBtn = document.getElementById("modeBtn");
+const jamoPanel = document.getElementById("jamoPanel");
+const composedEl = document.getElementById("composed");
+const curJamoEl = document.getElementById("curJamo");
 const hud = {
   dot: document.getElementById("statusDot"),
   status: document.getElementById("statusText"),
@@ -104,6 +108,50 @@ function appendResult(m) {
   results.append(el);
   while (results.children.length > MAX_RESULT_ENTRIES) results.firstChild.remove();
   results.scrollTop = results.scrollHeight;
+}
+
+// ---------------------------------------------------------------- 모드 (단어/지문자)
+
+// 단어 모드는 UI에서만 숨김(코드·서버·테스트 유지) — 지문자 기본. 복원: "word".
+let mode = "finger"; // "word" | "finger"
+
+modeBtn.addEventListener("click", () => {
+  mode = mode === "word" ? "finger" : "word";
+  modeBtn.textContent = mode === "word" ? "단어 모드" : "지문자 모드";
+  jamoPanel.hidden = mode !== "finger";
+  recDot.hidden = true;
+  if (mode === "finger") {
+    // 조합 표시 초기화 (서버 세션은 연결 유지되므로 표시만 리셋)
+    composedEl.textContent = "";
+    curJamoEl.textContent = "–";
+    lastSpokenComposed = "";
+  }
+});
+
+// 지문자 조합 결과 표시 + 완성 음절 TTS
+let lastSpokenComposed = "";
+
+function isCompleteSyllable(ch) {
+  const code = ch.codePointAt(0);
+  return code >= 0xac00 && code <= 0xd7a3; // 완성형 한글 음절
+}
+
+function handleJamo(m) {
+  composedEl.textContent = m.composed;
+  curJamoEl.textContent = m.current
+    ? `${m.current}  ${Math.round(m.confidence * 100)}%`
+    : (m.composed ? "" : "손을 비춰 지화하세요");
+  recDot.hidden = m.current === null; // 인식 중일 때만 빨간 점
+
+  // 새로 확정된 완성 음절만 TTS (조합 문자열이 자라며 앞 글자가 완성될 때)
+  if (m.composed && m.composed !== lastSpokenComposed) {
+    const done = [...m.composed].filter(isCompleteSyllable);
+    const prevDone = [...lastSpokenComposed].filter(isCompleteSyllable);
+    if (done.length > prevDone.length) {
+      tts.speak(done[done.length - 1]); // 방금 완성된 음절 1개
+    }
+    lastSpokenComposed = m.composed;
+  }
 }
 
 // ---------------------------------------------------------------- MediaPipe 로드
@@ -238,6 +286,8 @@ let stream = null;
 function applyMirror() {
   // 전면 카메라만 미러(CSS 전용) — 좌표 자체는 절대 반전하지 않아
   // 오버레이 정렬이 유지되고 서버 전송 좌표도 원본 그대로다.
+  // ※ 미러는 표시(프리뷰) 전용 — MediaPipe는 원본 픽셀을 읽고 전송 좌표·인식과
+  //   무관하다. 인식이 이상하다고 이 미러를 건드리지 말 것(원인 아님).
   video.classList.toggle("mirror", currentFacing === "user");
   canvas.classList.toggle("mirror", currentFacing === "user");
 }
@@ -305,6 +355,8 @@ class WSManager {
       } else if (m.type === "result") {
         appendResult(m);
         if (m.text !== null) tts.speak(m.text);
+      } else if (m.type === "jamo") {
+        handleJamo(m);
       }
     };
     this.ws.onclose = () => {
@@ -324,6 +376,18 @@ class WSManager {
       dim: v.length,
       // 4자리 반올림은 전송 전용 압축 — features.js 내부에는 반올림이 없다
       v: v.map((x) => Math.round(x * 1e4) / 1e4),
+    }));
+  }
+  // 지문자 모드: 손 21×2 원시 좌표 전송 (없으면 null → 서버 버퍼 리셋)
+  sendHand(hand, frameId, t) {
+    if (this.ws.readyState !== WebSocket.OPEN) return;
+    if (this.ws.bufferedAmount > WS_MAX_BUFFERED) return;
+    this.ws.send(JSON.stringify({
+      type: "hand",
+      frame_id: frameId,
+      t,
+      hand: hand ? hand.map((p) => [Math.round(p.x * 1e4) / 1e4,
+                                    Math.round(p.y * 1e4) / 1e4]) : null,
     }));
   }
 }
@@ -378,6 +442,17 @@ function loop(nowMs) {
   if (!res) return;
   drawResult(res);
 
+  // ── 지문자 모드: 손 좌표만 전송 (포즈 없이 손만 있어도 동작) ──
+  if (mode === "finger") {
+    // 원본 webcam_test_model_tflite.py 와 정합: Holistic 오른손만, 좌표 반전 없음.
+    // (원본은 cv2.flip 없이 right_hand_landmarks 의 lm.x, lm.y 를 그대로 모델에 넣음.)
+    // 왼손 폴백 금지 — 오른손 학습 모델에 왼손을 넣으면 x-반사로 뼈벡터 40개가 오염됨.
+    // res.rightHand 는 {x,y} 배열; sendHand 가 [x,y] 쌍으로 변환·전송. 없으면 버퍼 clear.
+    wsm.sendHand(res.rightHand ?? null, ++frameId, ts);
+    return;
+  }
+
+  // ── 단어 모드: 정규화 특징 벡터 전송 (기존) ──
   const v = extractFeatures(
     toXY(res.pose), toXY(res.leftHand), toXY(res.rightHand), toXY(res.face));
   if (!v) {
