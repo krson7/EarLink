@@ -1,19 +1,12 @@
-# M1 전용 의존성 — tensorflow는 M4(학습)에서 추가
+# 서버 (FastAPI + WebSocket)
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pyyaml>=6.0
 
-# M2: 테스트 의존성
+# 지문자 추론 (tflite)
+tensorflow==2.21.0
+numpy
+
+# 테스트
 pytest>=8.0
 httpx>=0.27
-
-# M3: 데이터 전처리 — 추출기 버전은 web/app.js MP_VERSION(0.10.35)과 반드시 일치
-mediapipe==0.10.35   # opencv-contrib-python·numpy를 전이 설치 — opencv-python 별도 추가 금지(cv2 중복 충돌)
-numpy                # np.save 등 직접 사용 (버전 제약은 mediapipe가 결정)
-
-# M4: 학습 — numpy 2.x와 호환되는 라인 (2.19는 numpy<2.2 요구 → mediapipe와 충돌)
-tensorflow==2.21.0
-matplotlib>=3.9      # evaluate.py 직접 사용 (혼동행렬·정확도 곡선)
-# 선택(TF 2.21과 조합 미검증, 기본 미설치): pip install tensorflow-metal==1.2.0
-#   → train.py가 GPU 프로브 실패 시 자동 CPU 폴백. import 자체가 죽으면 uninstall.
-

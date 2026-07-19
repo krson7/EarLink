@@ -1,44 +1,13 @@
-# 이어링크(EarLink) 설정 — M1은 server 섹션만 사용
+# 이어링크(EarLink) 설정
 server:
   host: 0.0.0.0        # 스마트폰/터널 테스트를 위해 모든 인터페이스 바인딩
   port: 8000
 
-data:
-  # M3: AI Hub 수어 영상 로컬 사본 루트. 하위 어디든 경로에 원천데이터/가
-  # 포함된 mp4만 스캔한다 (라벨링데이터/는 구조적으로 배제).
-  # $DATA_ROOT 환경변수 또는 --data-root CLI 인자가 있으면 그쪽이 우선.
-  data_root: "/Users/ayaan/Desktop/data"
-
-# M5: 발화 구간 탐지 (단위: 어깨폭/프레임, 클라이언트 ~15fps 기준)
-segmentation:
-  ema_alpha: 0.4            # 이동평균(EMA) 계수 — 유효 창 ~4프레임(≈270ms)
-  start_threshold: 0.06     # EMA가 넘으면 발화 시작 (대기 지터 ~0.01의 수 배)
-  # end_threshold/end_patience: 수어 중간의 짧은 멈춤(형태소 경계)에서 발화가
-  # 두 토막 나지 않도록 완화 (파리티 버그 수정, 2026-07-10). 분절이 너무
-  # 늦게 끝나면 end_threshold↑ 또는 patience↓, 또 끊기면 반대로 튜닝.
-  end_threshold: 0.02       # EMA가 내려가면 종료 후보 (히스테리시스)
-  end_patience_frames: 8    # 연속 미만이어야 종료 (~0.5초)
-  min_segment_frames: 8     # 미만이면 블립으로 폐기 (~0.5초)
-  max_segment_frames: 90    # 초과 시 강제 방출 (~6초)
-  lookback_frames: 3        # 시작 판정 시 직전 프레임 포함 (EMA 지연 보상)
-  cooldown_frames: 10       # 결과 후 재시작 금지 (~0.7초)
-  edge_trim_threshold: 0.02     # 세그먼트 양끝 저모션 트리밍 임곗값 (morpheme 트리밍 근사)
-  edge_trim_margin_frames: 2    # 트리밍 시 남기는 여유 프레임
-
-model:
-  # CLAUDE.md §5의 60프레임에서 45로 축소 (사용자 결정, 2026-07-10):
-  # 트리밍된 최종 30단어 클립 중 22개가 45프레임 미만이라 60은 대부분 패딩이 됨.
-  window_frames: 45
-  version: 1
-  confidence_threshold: 0.5  # M5: 미만이면 "인식 안 됨" (30단어 밖 동작 억지 매칭 방지)
-
-# Track 2: 지문자 모드 — Rahites/Sign_Language_Translation tflite (오픈소스, 그대로 사용).
-# 재학습(§11.5 ksl_finger) 시 model_path·라벨(server/fingerspelling.ACTIONS)만 교체.
+# 지문자 모드 — 재학습 시 model_path 와 server/fingerspelling.ACTIONS 만 교체
 fingerspelling:
   model_path: "models/fingerspelling/multi_hand_gesture_classifier.tflite"
   seq_len: 10              # tflite 입력 시퀀스 길이 (모델 고정)
   conf_threshold: 0.9      # 자모 확정 confidence 임곗값
-  # 같은 자모를 N프레임(~0.6초 @15fps) 유지해야 확정 — 자모를 만드는 도중
-  # 스쳐가는 손모양(예: ㅂ 만들다 거치는 ㅍ)은 유지 시간이 짧아 걸러진다.
-  # 연속 같은 자모(학교의 ㄱㄱ)는 사이에 손을 잠깐 내렸다 올리면 재확정된다.
+  # 같은 자모를 N프레임(~0.6초 @15fps) 유지해야 확정. 연속 같은 자모(학교의 ㄱㄱ)는
+  # 사이에 손을 잠깐 내렸다 올리면 재확정된다. 답답하면 낮추고, 오확정 잦으면 높인다.
   confirm_frames: 9

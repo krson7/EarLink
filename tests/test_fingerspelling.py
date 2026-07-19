@@ -1,6 +1,6 @@
-"""지문자 모드 단위테스트 — Track 2.
+"""지문자 인식 단위테스트.
 
-- vector_normalization 패리티: demo.py 원본과 서버 이식본이 bit 일치
+- frame_feature 회귀 (시드 손 입력 → 기준 55차원 golden)
 - Debouncer 상태기계
 - FingerspellingSession 조합 흐름 (predict 목킹으로 ㅎㅏㄱㄱㅛ→학교)
 - 실 tflite 스모크 (모델·TF 없으면 skip)
@@ -8,7 +8,6 @@
 TF 는 실 tflite 테스트에서만 필요 — 나머지는 순수 로직.
 """
 
-import importlib.util
 import json
 from pathlib import Path
 
@@ -20,42 +19,30 @@ from server.fingerspelling import (
     Debouncer,
     FingerspellingSession,
     frame_feature,
-    vector_normalization,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-DEMO_PY = ROOT / "demo_jamo_test" / "demo.py"
 TFLITE = ROOT / "models" / "fingerspelling" / "multi_hand_gesture_classifier.tflite"
 
 
-# ---------------------------------------------------------------- 전처리 패리티
+# ---------------------------------------------------------------- 전처리 회귀
 
-def _load_demo_module():
-    """demo.py 를 모듈로 로드. demo.py 는 'from hangul_compose import ...' 로
-    상대 임포트하므로 그 디렉토리를 일시적으로 sys.path 에 넣는다."""
-    import sys
-    demo_dir = str(DEMO_PY.parent)
-    sys.path.insert(0, demo_dir)
-    try:
-        spec = importlib.util.spec_from_file_location("demo_ref", DEMO_PY)
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
-        return m
-    finally:
-        sys.path.remove(demo_dir)
+# default_rng(42) 손 3개에 대한 frame_feature 기준값 (전처리 변경 시 회귀 검출).
+GOLDEN = [
+    [0.311189, 0.950348, -0.939682, 0.342051, 0.961905, -0.273384, -0.883472, -0.468484, -0.636995, 0.770868, 0.934513, -0.355929, -0.31901, -0.947751, 0.562462, -0.826823, 0.268217, 0.963359, -0.243388, -0.969929, 0.367177, 0.930151, -0.265454, -0.964124, -0.613884, -0.789396, -0.43911, 0.898433, 0.900907, 0.434013, -0.574384, -0.818586, -0.773518, -0.633774, -0.764661, 0.644433, 0.446968, 0.89455, 0.790549, 0.612398, 88.129074, 175.863876, 136.198349, 150.418533, 87.752663, 52.8293, 178.528397, 172.544983, 173.85231, 116.082001, 90.324615, 150.778976, 79.452293, 76.426117, 25.687582],
+    [0.258924, 0.965898, -0.652584, -0.757716, 0.893131, -0.449796, -0.964369, -0.26456, 0.238744, 0.971083, -0.576507, 0.817092, -0.757861, -0.652416, -0.574877, -0.81824, -0.196806, 0.980442, -0.331211, 0.943557, 0.312217, -0.950011, -0.289536, -0.957167, -0.983182, 0.182627, 0.988439, -0.151621, 0.964623, -0.263632, -0.998224, 0.059565, -0.758358, 0.651838, 0.907441, 0.420179, 0.273357, -0.961913, 0.530185, -0.847882, 154.269485, 104.006119, 137.928619, 49.017654, 95.518768, 14.184934, 7.992029, 178.850601, 35.023125, 178.198013, 6.564811, 168.129181, 114.473778, 98.981758, 16.153849],
+    [0.883042, 0.469295, -0.997572, 0.069637, -0.045834, 0.998949, 0.681779, -0.731559, 0.458603, 0.888641, 0.110446, -0.993882, -0.268626, 0.963245, 0.949163, -0.314786, 0.266581, 0.963813, 0.897316, -0.44139, -0.595251, -0.80354, -0.48857, 0.872525, 0.967975, 0.251045, -0.369428, 0.929259, -0.422169, 0.906517, 0.973316, -0.229467, 0.60608, 0.795404, 0.989186, 0.146667, -0.90558, -0.424176, -0.480448, 0.877023, 148.018341, 83.379845, 139.644226, 146.361984, 170.758514, 123.930374, 100.731682, 100.337944, 114.222832, 97.140991, 3.291234, 128.237274, 44.259605, 163.335266, 86.383881],
+]
 
 
-@pytest.mark.skipif(not DEMO_PY.exists(), reason="demo.py 없음")
-def test_vector_normalization_parity():
-    """서버 이식본과 demo.py 원본이 같은 손 입력에 bit 일치하는 55차원."""
-    demo = _load_demo_module()
+def test_frame_feature_golden():
+    """frame_feature 회귀 고정 — 시드된 손 입력 → 기준 55차원."""
     rng = np.random.default_rng(42)
-    for _ in range(5):
+    for expected in GOLDEN:
         hand = rng.uniform(0, 1, (21, 2))
-        srv = frame_feature(hand)
-        ref = demo.frame_feature(hand)
-        assert srv is not None and ref is not None
-        assert np.array_equal(srv, ref)  # 이식이 수치적으로 동일해야 함
+        got = frame_feature(hand)
+        assert got is not None
+        np.testing.assert_allclose(got, expected, rtol=0, atol=1e-5)
 
 
 def test_frame_feature_shape():

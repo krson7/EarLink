@@ -6,22 +6,11 @@ __pycache__/
 # macOS
 .DS_Store
 
-# 학습 산출물 (M4)
-models/*.keras
-models/*.json
-models/*.png
-!models/.gitkeep
-# 단, 학습된 모델 3종은 저장소에 포함한다 (윈도우 인수인계 — 재학습 없이
-# 서버·추론을 바로 띄우기 위함). 시각화 png·중간 산출물은 계속 무시.
-!models/ksl_word_v*.keras
-!models/ksl_word_v*.labels.json
-!models/ksl_word_v*.history.json
-
-# M3: 전처리 산출물·MediaPipe 모델 캐시 (재생성 가능 — 저장소에서 제외)
+# 전처리 산출물·MediaPipe 모델 캐시 (재생성 가능 — 저장소에서 제외)
 data/
 models/mediapipe/
 
-# Track 2: 지문자 tflite (Rahites 오픈소스 — 핸드오프 아티팩트, 저장소에 포함)
+# 지문자 tflite 는 저장소에 포함 (재학습 없이 바로 실행)
 !models/fingerspelling/
 !models/fingerspelling/*.tflite
 

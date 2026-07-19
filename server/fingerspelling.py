@@ -1,21 +1,11 @@
-"""지문자(fingerspelling) 인식 — Track 2.
+"""지문자(fingerspelling) 인식.
 
-손 21점 → Rahites 전처리(Vector_Normalization: 뼈 단위벡터 20 + 관절 각도 15
-= 55차원, 시퀀스 10) → tflite 분류 → 디바운스 → 한글 조합.
+손 21점 → 전처리(뼈 단위벡터 20 + 관절 각도 15 = 55차원, 시퀀스 10) → tflite
+분류 → 디바운스 → 한글 조합(shared.hangul_compose).
 
-모델·전처리는 GitHub 오픈소스를 재작성 없이 그대로 사용한다:
-  Rahites/Sign_Language_Translation (multi_hand_gesture_classifier.tflite).
-vector_normalization / frame_feature / Debouncer / ACTIONS 는 demo_jamo_test/
-demo.py 에서 수치적으로 동일하게 이식했다(패리티 테스트로 보장). 한글 조합은
-프로젝트 공용 shared.hangul_compose.HangulComposer 를 쓴다.
-
-정확도 주의: 이 tflite 는 근접 웹캠 소수 인원 데이터로 학습돼 AI Hub 원거리
-영상에선 정확도가 낮다. 지금은 배선(파이프라인 연결)이 목적이며, 재학습
-(CLAUDE.md §11.5, ksl_finger)으로 config 의 model_path·라벨만 바꾸면 아키텍처
-변경 없이 정확도를 올릴 수 있다.
-
-TF/tflite 는 지연 import(FingerspellPredictor.load 내부) — 상태기계·전처리
-단위테스트가 TF 없이 돌아야 하고, 서버 기동 로그에서 로드 시점이 명확해진다.
+TF/tflite 는 지연 import(FingerspellPredictor.load 내부) — 전처리·상태기계
+단위테스트가 TF 없이 돌고, 서버 기동 로그에서 로드 시점이 명확해진다.
+재학습 시 config 의 model_path 와 아래 ACTIONS 만 교체하면 된다.
 """
 
 import threading
@@ -28,14 +18,13 @@ from shared.hangul_compose import HangulComposer
 
 SEQ_LEN = 10  # tflite 입력 시퀀스 길이 (모델 고정)
 
-# tflite 출력 31 클래스 (Rahites 학습 라벨 순서 — 재학습 시 이 리스트도 교체).
+# tflite 출력 31 클래스 (자모 라벨 순서 — 재학습 시 이 리스트도 교체).
 ACTIONS = ['ㄱ', 'ㄴ', 'ㄷ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅅ', 'ㅇ', 'ㅈ', 'ㅊ',
            'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ', 'ㅏ', 'ㅑ', 'ㅓ', 'ㅕ', 'ㅗ', 'ㅛ',
            'ㅜ', 'ㅠ', 'ㅡ', 'ㅣ', 'ㅐ', 'ㅒ', 'ㅔ', 'ㅖ', 'ㅢ', 'ㅚ', 'ㅟ']
 
 
 # ---------------------------------------------------------------- 전처리
-# (Rahites utils.py 의 Vector_Normalization 그대로 — demo.py 와 수치 동일)
 
 
 def vector_normalization(joint):
@@ -59,7 +48,7 @@ def frame_feature(joint):
 
 
 # ---------------------------------------------------------------- 디바운스
-# (demo.py Debouncer 기반 — 같은 자모 N프레임 유지 시 확정, 해제 후 재확정 허용)
+# 같은 자모 N프레임 유지 시 확정, 해제(손뗌/저신뢰/다른 자모) 후 재확정 허용.
 
 
 class Debouncer:
@@ -102,11 +91,10 @@ class Debouncer:
 
 
 class FingerspellPredictor:
-    """기동 시 1회 로드되는 tflite 싱글턴 (단어 모드 Predictor 와 대칭).
+    """기동 시 1회 로드되는 tflite 싱글턴.
 
     tflite Interpreter 는 스레드 안전하지 않다 — set_tensor/invoke/get_tensor
-    한 벌을 Lock 으로 직렬화한다(asyncio.to_thread 로 여러 연결이 동시에
-    호출할 수 있으므로). 10×55 invoke 는 1ms 미만이라 락 비용은 무시할 만하다.
+    한 벌을 Lock 으로 직렬화한다(asyncio.to_thread 로 여러 연결이 동시에 호출).
     """
 
     def __init__(self, interp, inp, out, actions):
@@ -118,7 +106,7 @@ class FingerspellPredictor:
 
     @classmethod
     def load(cls, model_path, actions=ACTIONS):
-        """tflite 로드. 파일 없으면 None (서버는 단어 모드만으로 기동)."""
+        """tflite 로드. 파일 없으면 None (에코만으로 기동)."""
         path = Path(model_path)
         if not path.exists():
             return None
@@ -145,11 +133,10 @@ class FingerspellPredictor:
 
 
 class FingerspellingSession:
-    """WebSocket 연결당 1개 (단어 모드 UtteranceSession 과 대칭).
+    """WebSocket 연결당 1개.
 
     손 21점을 받아 55차원 시퀀스 버퍼(10)를 채우고, 버퍼가 차면 예측·디바운스,
-    확정 자모를 HangulComposer 로 조합한다. push() 는 프런트로 보낼 jamo 메시지
-    dict(current/confidence/confirmed/composed)를 반환한다.
+    확정 자모를 HangulComposer 로 조합한다. push() 는 jamo 메시지 dict 를 반환한다.
     """
 
     def __init__(self, predictor, confirm_frames=8, conf_threshold=0.8):

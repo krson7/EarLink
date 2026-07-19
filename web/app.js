@@ -1,10 +1,8 @@
-// 이어링크(EarLink) M5 — 카메라 → MediaPipe 키포인트 → 특징 벡터 전송
-//                        → 서버 발화 탐지·추론 결과 표시 + 한국어 TTS.
+// 이어링크(EarLink) — 카메라 → MediaPipe 손 키포인트 전송
+//                    → 서버 자모 추론·조합 결과 표시 + 한국어 TTS.
 //
-// 개인정보 설계 원칙: 서버로는 정규화된 특징 벡터 JSON만 보낸다.
+// 개인정보 설계 원칙: 서버로는 손 키포인트 JSON만 보낸다.
 // 영상 프레임(이미지/blob)을 전송하는 코드를 이 파일에 추가하지 않는다.
-
-import { extractFeatures, FEATURE_DIM } from "./features.js";
 
 // http://0.0.0.0:8000 은 브라우저가 보안 컨텍스트로 취급하지 않아 카메라가
 // 차단된다 (uvicorn 로그의 0.0.0.0 링크를 그대로 여는 실수 방지) → localhost로 이동.
@@ -33,10 +31,7 @@ const ctx = canvas.getContext("2d");
 const banner = document.getElementById("banner");
 const flipBtn = document.getElementById("flipBtn");
 const recDot = document.getElementById("recDot");
-const results = document.getElementById("results");
 const ttsBtn = document.getElementById("ttsBtn");
-const modeBtn = document.getElementById("modeBtn");
-const jamoPanel = document.getElementById("jamoPanel");
 const composedEl = document.getElementById("composed");
 const curJamoEl = document.getElementById("curJamo");
 const hud = {
@@ -45,7 +40,6 @@ const hud = {
   frames: document.getElementById("hudFrames"),
   rtt: document.getElementById("hudRtt"),
   dims: document.getElementById("hudDims"),
-  feat: document.getElementById("hudFeat"),
   mode: document.getElementById("hudMode"),
 };
 
@@ -91,42 +85,6 @@ ttsBtn.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------- 결과 로그
-
-const MAX_RESULT_ENTRIES = 50;
-
-function appendResult(m) {
-  const el = document.createElement("div");
-  const pct = Math.round(m.confidence * 100);
-  if (m.text === null) {
-    // 서버 계약: text=null ⇒ 저신뢰 "인식 안 됨" (TTS 금지)
-    el.className = "entry miss";
-    el.innerHTML = `인식 안 됨 <small>(추정: ${m.top1} ${pct}%)</small>`;
-  } else {
-    el.className = "entry";
-    el.innerHTML = `${m.text} <small>${pct}%</small>`;
-  }
-  results.append(el);
-  while (results.children.length > MAX_RESULT_ENTRIES) results.firstChild.remove();
-  results.scrollTop = results.scrollHeight;
-}
-
-// ---------------------------------------------------------------- 모드 (단어/지문자)
-
-// 단어 모드는 UI에서만 숨김(코드·서버·테스트 유지) — 지문자 기본. 복원: "word".
-let mode = "finger"; // "word" | "finger"
-
-modeBtn.addEventListener("click", () => {
-  mode = mode === "word" ? "finger" : "word";
-  modeBtn.textContent = mode === "word" ? "단어 모드" : "지문자 모드";
-  jamoPanel.hidden = mode !== "finger";
-  recDot.hidden = true;
-  if (mode === "finger") {
-    // 조합 표시 초기화 (서버 세션은 연결 유지되므로 표시만 리셋)
-    composedEl.textContent = "";
-    curJamoEl.textContent = "–";
-    lastSpokenComposed = "";
-  }
-});
 
 // 지문자 조합 결과 표시 + 완성 음절 TTS
 let lastSpokenComposed = "";
@@ -350,11 +308,6 @@ class WSManager {
         hud.frames.textContent = m.frame_id;
         hud.rtt.textContent = Math.max(0, Math.round(performance.now() - m.t));
         hud.dims.textContent = m.n_dims;
-      } else if (m.type === "status") {
-        recDot.hidden = m.state !== "signing";
-      } else if (m.type === "result") {
-        appendResult(m);
-        if (m.text !== null) tts.speak(m.text);
       } else if (m.type === "jamo") {
         handleJamo(m);
       }
@@ -366,19 +319,7 @@ class WSManager {
     };
     this.ws.onerror = () => this.ws.close();
   }
-  sendFeatures(v, frameId, t) {
-    if (this.ws.readyState !== WebSocket.OPEN) return;
-    if (this.ws.bufferedAmount > WS_MAX_BUFFERED) return; // 밀리면 프레임 드롭
-    this.ws.send(JSON.stringify({
-      type: "features",
-      frame_id: frameId,
-      t,
-      dim: v.length,
-      // 4자리 반올림은 전송 전용 압축 — features.js 내부에는 반올림이 없다
-      v: v.map((x) => Math.round(x * 1e4) / 1e4),
-    }));
-  }
-  // 지문자 모드: 손 21×2 원시 좌표 전송 (없으면 null → 서버 버퍼 리셋)
+  // 손 21×2 원시 좌표 전송 (없으면 null → 서버 버퍼 리셋)
   sendHand(hand, frameId, t) {
     if (this.ws.readyState !== WebSocket.OPEN) return;
     if (this.ws.bufferedAmount > WS_MAX_BUFFERED) return;
@@ -423,10 +364,6 @@ let lastDetectMs = 0;
 let frameId = 0;
 let wsm = null;
 
-// MediaPipe 랜드마크 객체({x, y, …}) → features 모듈 입력 형식([x, y] 쌍).
-// 반올림 없이 원본 정밀도 그대로 특징을 계산한다.
-const toXY = (lm) => (lm ? lm.map((p) => [p.x, p.y]) : null);
-
 function loop(nowMs) {
   requestAnimationFrame(loop);
   if (!landmarker || video.readyState < 2) return;
@@ -442,31 +379,9 @@ function loop(nowMs) {
   if (!res) return;
   drawResult(res);
 
-  // ── 지문자 모드: 손 좌표만 전송 (포즈 없이 손만 있어도 동작) ──
-  if (mode === "finger") {
-    // 원본 webcam_test_model_tflite.py 와 정합: Holistic 오른손만, 좌표 반전 없음.
-    // (원본은 cv2.flip 없이 right_hand_landmarks 의 lm.x, lm.y 를 그대로 모델에 넣음.)
-    // 왼손 폴백 금지 — 오른손 학습 모델에 왼손을 넣으면 x-반사로 뼈벡터 40개가 오염됨.
-    // res.rightHand 는 {x,y} 배열; sendHand 가 [x,y] 쌍으로 변환·전송. 없으면 버퍼 clear.
-    wsm.sendHand(res.rightHand ?? null, ++frameId, ts);
-    return;
-  }
-
-  // ── 단어 모드: 정규화 특징 벡터 전송 (기존) ──
-  const v = extractFeatures(
-    toXY(res.pose), toXY(res.leftHand), toXY(res.rightHand), toXY(res.face));
-  if (!v) {
-    hud.feat.textContent = "무효 (포즈 미검출)";
-    return; // 무효 프레임은 전송하지 않는다
-  }
-  // 디버그: 차원 수 + 정규화 후 값 범위 (마지막 마스크 2개 제외한 좌표부만)
-  let mn = Infinity, mx = -Infinity;
-  for (let i = 0; i < FEATURE_DIM - 2; i++) {
-    if (v[i] < mn) mn = v[i];
-    if (v[i] > mx) mx = v[i];
-  }
-  hud.feat.textContent = `${v.length} [${mn.toFixed(2)}, ${mx.toFixed(2)}]`;
-  wsm.sendFeatures(v, ++frameId, ts);
+  // 오른손만, 좌표 반전 없음 — 모델이 오른손 원좌표로 학습됨. 왼손을 넣으면
+  // x-반사로 뼈벡터 40개가 오염되므로 폴백 금지. 없으면 null → 서버 버퍼 clear.
+  wsm.sendHand(res.rightHand ?? null, ++frameId, ts);
 }
 
 // ---------------------------------------------------------------- 부팅
