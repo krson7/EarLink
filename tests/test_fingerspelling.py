@@ -165,24 +165,65 @@ def test_real_tflite_predict():
 # ---------------------------------------------------------------- WS 라우팅
 
 def test_ws_hand_routing():
-    """hand 메시지 → echo 응답 (jamo 는 predictor 있으면 추가)."""
+    """hand 메시지 → echo 응답 (jamo는 predictor가 있으면 추가)."""
     from fastapi.testclient import TestClient
     from server.main import app
 
     hand = [[0.5, 0.5]] * 21
-    with TestClient(app) as client:  # lifespan → 모델 로드
-        with client.websocket_connect("/ws/translate") as ws:
-            ws.send_text(json.dumps({"type": "hand", "frame_id": 1,
-                                     "t": 0.0, "hand": hand}))
-            msgs = []
-            for _ in range(2):  # echo + (predictor 있으면) jamo
+
+    with TestClient(app) as client:
+        join_response = client.post(
+            "/rooms/join",
+            json={
+                "accessibility_mode": "HEARING",
+            },
+        )
+
+        assert join_response.status_code == 201
+
+        participant = join_response.json()
+        room_code = participant["room_code"]
+        participant_id = participant["participant_id"]
+
+        websocket_url = (
+            f"/ws/translate/"
+            f"{room_code}/"
+            f"{participant_id}"
+        )
+
+        with client.websocket_connect(
+            websocket_url,
+        ) as ws:
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "hand",
+                        "frame_id": 1,
+                        "t": 0.0,
+                        "hand": hand,
+                    }
+                )
+            )
+
+            messages = []
+
+            for _ in range(2):
                 try:
-                    msgs.append(json.loads(ws.receive_text()))
+                    messages.append(
+                        json.loads(
+                            ws.receive_text()
+                        )
+                    )
                 except Exception:
                     break
-            types = {m["type"] for m in msgs}
-            assert "echo" in types
-            # tflite 로드됐으면 jamo 도 옴 (버퍼 미충족이라 current=None)
-            for m in msgs:
-                if m["type"] == "jamo":
-                    assert "composed" in m
+
+            message_types = {
+                message["type"]
+                for message in messages
+            }
+
+            assert "echo" in message_types
+
+            for message in messages:
+                if message["type"] == "jamo":
+                    assert "composed" in message

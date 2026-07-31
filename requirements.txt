@@ -1,12 +1,17 @@
-# 서버 (FastAPI + WebSocket)
-fastapi>=0.115
-uvicorn[standard]>=0.30
-pyyaml>=6.0
+# FastAPI 서버 및 WebSocket
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+PyYAML>=6.0,<7.0
 
-# 지문자 추론 (tflite)
+# PostgreSQL 데이터베이스
+SQLAlchemy>=2.0,<3.0
+psycopg[binary]>=3.2,<4.0
+python-dotenv>=1.0,<2.0
+
+# 지문자 TFLite 추론
 tensorflow==2.21.0
 numpy
 
 # 테스트
-pytest>=8.0
-httpx>=0.27
+pytest>=8.0,<9.0
+httpx>=0.27,<1.0

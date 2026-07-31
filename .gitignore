@@ -1,21 +1,46 @@
-# Python
+# Python 가상환경
+venv/
 .venv/
+
+# Python 캐시
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 
-# macOS
+# 테스트 및 분석 캐시
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+
+# 환경변수
+.env
+.env.*
+!.env.example
+
+# macOS / Windows
 .DS_Store
+Thumbs.db
 
-# 전처리 산출물·MediaPipe 모델 캐시 (재생성 가능 — 저장소에서 제외)
+# 전처리 산출물·MediaPipe 모델 캐시
 data/
 models/mediapipe/
 
-# 지문자 tflite 는 저장소에 포함 (재학습 없이 바로 실행)
+# 지문자 TFLite 모델은 저장소에 포함
 !models/fingerspelling/
 !models/fingerspelling/*.tflite
 
-# 개발 중 도구 산출물 (브라우저 진단 캡처 등)
+# 개발 도구 산출물
 .playwright-mcp/
 
-# 환경 변수
-.env
+# IDE
+.vscode/
+.idea/
+
+# 로그
+*.log
