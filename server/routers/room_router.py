@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from server.database import get_db
+from server.routers.device_presence_router import router as device_presence_router
 from server.entities.participant import (
     AccessibilityMode,
 )
@@ -92,3 +93,5 @@ def join_room_api(
             ),
             detail=str(error),
         ) from error
+
+router.include_router(device_presence_router)
