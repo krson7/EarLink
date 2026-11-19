@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from fastapi import (
     APIRouter,
@@ -155,6 +156,7 @@ async def chat_websocket(
 
     # 아래부터는 검증이 성공한 연결만 실행된다.
     connected = False
+    typing_active = False
 
     try:
         # WebSocket accept는 위에서 이미 처리했으며,
@@ -167,12 +169,59 @@ async def chat_websocket(
 
         connected = True
 
+        # Clients wait for this before sending control frames. Older clients
+        # still send plain text and ignore unknown server event types.
+        await websocket.send_json({"type": "capabilities", "braille_events": True, "braille_drafts": True})
+
         while True:
             content = (
                 await websocket.receive_text()
             )
 
             content = content.strip()
+            source = None
+            event = None
+            if content.startswith("{") and len(content) <= MAX_CHAT_MESSAGE_LENGTH * 6 + 256:
+                try:
+                    event = json.loads(content)
+                except (ValueError, RecursionError):
+                    pass
+
+            if isinstance(event, dict) and event.get("type") == "typing":
+                if event.get("source") != "braille" or not isinstance(event.get("active"), bool):
+                    await websocket.send_json({
+                        "type": "error", "code": "INVALID_TYPING_EVENT",
+                        "detail": "점자 입력 상태 형식이 올바르지 않습니다.",
+                    })
+                    continue
+                draft = event.get("content")
+                if draft is not None and (not isinstance(draft, str) or len(draft) > MAX_CHAT_MESSAGE_LENGTH):
+                    await websocket.send_json({
+                        "type": "error", "code": "INVALID_TYPING_EVENT",
+                        "detail": "점자 입력 내용은 최대 1000자의 문자열이어야 합니다.",
+                    })
+                    continue
+                typing_active = event["active"]
+                await chat_manager.broadcast(
+                    room_code=normalized_room_code,
+                    message={
+                        "type": "typing", "source": "braille",
+                        "sender_id": participant_id, "active": typing_active,
+                        **({"content": draft if typing_active else ""} if draft is not None else {}),
+                    },
+                )
+                continue
+
+            if (isinstance(event, dict) and event.get("type") == "message"
+                    and event.get("source") == "braille"):
+                if not isinstance(event.get("content"), str):
+                    await websocket.send_json({
+                        "type": "error", "code": "INVALID_MESSAGE",
+                        "detail": "점자 메시지 내용은 문자열이어야 합니다.",
+                    })
+                    continue
+                content = event["content"].strip()
+                source = "braille"
 
             # 공백 또는 빈 메시지는 전송하지 않는다.
             if not content:
@@ -212,6 +261,17 @@ async def chat_websocket(
                 "sender_id": participant_id,
                 "content": content,
             }
+            if source == "braille":
+                message["source"] = source
+                if typing_active:
+                    typing_active = False
+                    await chat_manager.broadcast(
+                        room_code=normalized_room_code,
+                        message={
+                            "type": "typing", "source": "braille",
+                            "sender_id": participant_id, "active": False,
+                        },
+                    )
 
             # 같은 room_code에 연결된 참가자에게만
             # 메시지를 전송한다.
@@ -264,8 +324,19 @@ async def chat_websocket(
         # 연결 관리자에 정상적으로 등록된 경우에만
         # 연결 정보를 제거한다.
         if connected:
+            # An old socket must not clear a replacement connection's status.
+            is_current = (chat_manager.active_connections.get(normalized_room_code, {})
+                          .get(participant_id) is websocket)
             chat_manager.disconnect(
                 room_code=normalized_room_code,
                 participant_id=participant_id,
                 websocket=websocket,
             )
+            if typing_active and is_current:
+                await chat_manager.broadcast(
+                    room_code=normalized_room_code,
+                    message={
+                        "type": "typing", "source": "braille",
+                        "sender_id": participant_id, "active": False,
+                    },
+                )
